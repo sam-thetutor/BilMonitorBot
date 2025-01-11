@@ -4,7 +4,7 @@
   "type": "module",
   "main": "monitor.js",
   "scripts": {
-    "start": "node monitorNode/monitor.js",
+    "start": "node monitor.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
