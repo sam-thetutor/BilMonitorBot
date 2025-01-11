@@ -8,6 +8,7 @@ import { idlFactory } from './bil.did.js';
 import { idlFactory as storecanisterIdlFactory } from './storecanister.did.js';
 import { convertTime, shortenAddress } from './constants.js';
 import { DiscordBot } from './discordBot.js';
+import { keepAlive } from './keep_alive.js';
 
 dotenv.config();
 
@@ -41,39 +42,24 @@ let bilBackendActor = createActor(BIL_BACKEND,idlFactory, agent);
 let storecanisterActor = createActor(STORE_CANISTER,storecanisterIdlFactory, agent);
 
 const discordBot = new DiscordBot();
-await discordBot.initialize();
 
 // Function to initialize bot with reconnection logic
 function initializeBot() {
     try {
-        bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, botOptions);
-        isConnected = true;
-        console.log('Bot successfully connected to Telegram servers');
-
-        // Reset connection on error
-        bot.on('error', (error) => {
-            console.error('Bot error:', error.message);
-            if (isConnected) {
-                isConnected = false;
-                console.log('Attempting to reconnect in 5 seconds...');
-                setTimeout(reconnectBot, 5000);
-            }
-        });
-
-        // Handle polling errors
-        bot.on('polling_error', (error) => {
-            console.error('Polling error:', error.message);
-            if (error.code === 'ETIMEDOUT' || error.code === 'ECONNRESET') {
-                if (isConnected) {
-                    isConnected = false;
-                    console.log('Connection timeout. Attempting to reconnect in 5 seconds...');
-                    setTimeout(reconnectBot, 5000);
-                }
-            }
-        });
-
-        setupBotHandlers();
-        
+        if (bot) {
+            bot.stopPolling()
+                .then(() => {
+                    bot = null;
+                    createNewBot();
+                })
+                .catch(error => {
+                    console.error('Error stopping bot:', error);
+                    bot = null;
+                    createNewBot();
+                });
+        } else {
+            createNewBot();
+        }
     } catch (error) {
         console.error('Failed to initialize bot:', error);
         console.log('Attempting to reconnect in 5 seconds...');
@@ -257,16 +243,60 @@ async function monitor() {
     console.log("current value",currentValue);
 }
 
-// Initialize the bot
-initializeBot();
+// Add this new function
+function createNewBot() {
+    bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, {
+        polling: true,
+        request: {
+            timeout: 30000,
+            proxy: false,
+            retry: 5,
+            connect_timeout: 30000
+        }
+    });
+    isConnected = true;
+    console.log('Bot successfully connected to Telegram servers');
 
-// Schedule tasks only after successful connection
-if (isConnected) {
-    // Schedule the monitoring to run every 1 seconds
-    schedule.scheduleJob('*/10 * * * * *', monitor);
+    bot.on('error', (error) => {
+        console.error('Bot error:', error.message);
+        if (isConnected) {
+            isConnected = false;
+            console.log('Attempting to reconnect in 5 seconds...');
+            setTimeout(reconnectBot, 5000);
+        }
+    });
 
-   // Schedule activity message every minute
-    schedule.scheduleJob('*/10 * * * *', sendActivityMessage);
+    bot.on('polling_error', (error) => {
+        console.error('Polling error:', error.message);
+        if (error.code === 'ETIMEDOUT' || error.code === 'ECONNRESET' || error.message.includes('ETELEGRAM')) {
+            if (isConnected) {
+                isConnected = false;
+                console.log('Connection timeout. Attempting to reconnect in 5 seconds...');
+                setTimeout(reconnectBot, 5000);
+            }
+        }
+    });
 
-    console.log('Monitoring service started...');
-} 
+    setupBotHandlers();
+}
+
+// Move the initialization to the end of the file and ensure proper order
+async function startBot() {
+    try {
+        keepAlive();
+        await discordBot.initialize();
+        initializeBot();
+        
+        // Schedule tasks only after successful connection
+        if (isConnected) {
+            schedule.scheduleJob('*/10 * * * * *', monitor);
+            schedule.scheduleJob('*/10 * * * *', sendActivityMessage);
+            console.log('Monitoring service started...');
+        }
+    } catch (error) {
+        console.error('Error starting bot:', error);
+        process.exit(1);
+    }
+}
+
+startBot(); 
