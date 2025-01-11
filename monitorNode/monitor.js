@@ -23,8 +23,9 @@ const botOptions = {
     }
 };
 
-let bot;
+let bot = null;
 let isConnected = false;
+let pollingActive = false;
 let latestBlock = 0;
 let ICPSWAP_URL = 'https://www.kongswap.io/swap?from=ktra4-taaaa-aaaag-atveq-cai&to=ryjl3-tyaaa-aaaaa-aaaba-cai';
 let KONGSWAP_URL = 'https://www.kongswap.io/swap?from=ktra4-taaaa-aaaag-atveq-cai&to=ryjl3-tyaaa-aaaaa-aaaba-cai';
@@ -43,23 +44,74 @@ let storecanisterActor = createActor(STORE_CANISTER,storecanisterIdlFactory, age
 
 const discordBot = new DiscordBot();
 
-// Function to initialize bot with reconnection logic
-function initializeBot() {
-    try {
-        if (bot) {
-            bot.stopPolling()
-                .then(() => {
-                    bot = null;
-                    createNewBot();
-                })
-                .catch(error => {
-                    console.error('Error stopping bot:', error);
-                    bot = null;
-                    createNewBot();
-                });
-        } else {
-            createNewBot();
+// Function to stop polling safely
+async function stopPolling() {
+    if (bot && pollingActive) {
+        try {
+            pollingActive = false;
+            await bot.stopPolling();
+            console.log('Polling stopped successfully');
+        } catch (error) {
+            console.error('Error stopping polling:', error);
         }
+    }
+}
+
+// Function to create new bot
+async function createNewBot() {
+    try {
+        // Ensure any existing polling is stopped
+        await stopPolling();
+        
+        // Wait a moment before creating new instance
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, {
+            polling: false // Start with polling disabled
+        });
+
+        // Setup event handlers before starting polling
+        bot.on('error', (error) => {
+            console.error('Bot error:', error.message);
+            if (isConnected) {
+                isConnected = false;
+                pollingActive = false;
+                setTimeout(reconnectBot, 5000);
+            }
+        });
+
+        bot.on('polling_error', (error) => {
+            console.error('Polling error:', error.message);
+            if (error.message.includes('ETELEGRAM') || error.code === 'ETIMEDOUT' || error.code === 'ECONNRESET') {
+                if (isConnected) {
+                    isConnected = false;
+                    pollingActive = false;
+                    setTimeout(reconnectBot, 5000);
+                }
+            }
+        });
+
+        // Setup other handlers
+        setupBotHandlers();
+
+        // Start polling only after everything is set up
+        await bot.startPolling({ restart: false });
+        pollingActive = true;
+        isConnected = true;
+        console.log('Bot successfully connected to Telegram servers');
+
+    } catch (error) {
+        console.error('Error creating bot:', error);
+        isConnected = false;
+        pollingActive = false;
+        throw error;
+    }
+}
+
+// Function to initialize bot with reconnection logic
+async function initializeBot() {
+    try {
+        await createNewBot();
     } catch (error) {
         console.error('Failed to initialize bot:', error);
         console.log('Attempting to reconnect in 5 seconds...');
@@ -68,13 +120,10 @@ function initializeBot() {
 }
 
 // Function to reconnect bot
-function reconnectBot() {
+async function reconnectBot() {
     if (!isConnected) {
         try {
-            if (bot) {
-                bot.stopPolling();
-            }
-            initializeBot();
+            await initializeBot();
         } catch (error) {
             console.error('Reconnection failed:', error);
             console.log('Retrying in 5 seconds...');
@@ -243,51 +292,19 @@ async function monitor() {
     console.log("current value",currentValue);
 }
 
-// Add this new function
-function createNewBot() {
-    bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, {
-        polling: true,
-        request: {
-            timeout: 30000,
-            proxy: false,
-            retry: 5,
-            connect_timeout: 30000
-        }
-    });
-    isConnected = true;
-    console.log('Bot successfully connected to Telegram servers');
-
-    bot.on('error', (error) => {
-        console.error('Bot error:', error.message);
-        if (isConnected) {
-            isConnected = false;
-            console.log('Attempting to reconnect in 5 seconds...');
-            setTimeout(reconnectBot, 5000);
-        }
-    });
-
-    bot.on('polling_error', (error) => {
-        console.error('Polling error:', error.message);
-        if (error.code === 'ETIMEDOUT' || error.code === 'ECONNRESET' || error.message.includes('ETELEGRAM')) {
-            if (isConnected) {
-                isConnected = false;
-                console.log('Connection timeout. Attempting to reconnect in 5 seconds...');
-                setTimeout(reconnectBot, 5000);
-            }
-        }
-    });
-
-    setupBotHandlers();
-}
-
-// Move the initialization to the end of the file and ensure proper order
+// Modify the startBot function
 async function startBot() {
     try {
+        // Start the keep-alive server
         keepAlive();
-        await discordBot.initialize();
-        initializeBot();
         
-        // Schedule tasks only after successful connection
+        // Initialize Discord bot
+        await discordBot.initialize();
+        
+        // Initialize Telegram bot
+        await initializeBot();
+        
+        // Only schedule tasks if bot is connected
         if (isConnected) {
             schedule.scheduleJob('*/10 * * * * *', monitor);
             schedule.scheduleJob('*/10 * * * *', sendActivityMessage);
@@ -299,4 +316,18 @@ async function startBot() {
     }
 }
 
+// Add graceful shutdown handling
+process.on('SIGINT', async () => {
+    console.log('Received SIGINT. Cleaning up...');
+    await stopPolling();
+    process.exit(0);
+});
+
+process.on('SIGTERM', async () => {
+    console.log('Received SIGTERM. Cleaning up...');
+    await stopPolling();
+    process.exit(0);
+});
+
+// Start the bot
 startBot(); 
