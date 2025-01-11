@@ -7,7 +7,8 @@
 
 # testing
 /coverage
-
+/monitorNode/.env
+/monitorNode/node_modules
 # production
 /build
 
