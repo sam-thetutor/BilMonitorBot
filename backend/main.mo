@@ -9,6 +9,8 @@ actor class BIlMonitor() = this {
     let BIL_BACKEND : Text = "hx36f-waaaa-aaaai-aq32q-cai";
     let bilBackendActor = actor (BIL_BACKEND) : BilTypes.Self;
 
+
+    stable var testNumber : Nat = 0;
     //stable structure to store thetelegram group codes
     stable var telegramGroupCodes : [Text] = [];
 
@@ -26,6 +28,16 @@ actor class BIlMonitor() = this {
     public query func getTelegramGroupCodes() : async [Text] {
         return telegramGroupCodes;
     };
+
+//get the test number
+public query func getTestNumber() : async Nat {
+    return testNumber;
+};
+//increment the test number
+public func incrementTestNumber() : async () {
+    testNumber := testNumber + 1;
+};
+
 
     
 

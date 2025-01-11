@@ -7,6 +7,7 @@ import { HttpAgent } from '@dfinity/agent';
 import { idlFactory } from './bil.did.js';
 import { idlFactory as storecanisterIdlFactory } from './storecanister.did.js';
 import { convertTime, shortenAddress } from './constants.js';
+import { DiscordBot } from './discordBot.js';
 
 dotenv.config();
 
@@ -39,9 +40,8 @@ const agent = new HttpAgent({
 let bilBackendActor = createActor(BIL_BACKEND,idlFactory, agent);
 let storecanisterActor = createActor(STORE_CANISTER,storecanisterIdlFactory, agent);
 
-
-
-
+const discordBot = new DiscordBot();
+await discordBot.initialize();
 
 // Function to initialize bot with reconnection logic
 function initializeBot() {
@@ -158,6 +158,11 @@ async function safeMessageSend(chatId, message, inlineKeyboard, retries = 3,) {
 }
 // Function to send notification to all groups
 async function sendNotificationToAllGroups(message) {
+    const urls = {
+        icpswap: ICPSWAP_URL,
+        kongswap: KONGSWAP_URL,
+        website: WEBSITE_URL
+    };
 
     const inlineKeyboard = {
         reply_markup: {
@@ -176,7 +181,7 @@ async function sendNotificationToAllGroups(message) {
                     {
                         text: '🎊 Website!',
                         url: WEBSITE_URL,
-                        callback_data: 'celebrate'  // This makes the button appear wider
+                        callback_data: 'celebrate'
                     }
                 ]
             ]
@@ -184,66 +189,21 @@ async function sendNotificationToAllGroups(message) {
         parse_mode: 'HTML'
     };
 
-
-
-    //fetch all the chat ids from the canister
-
+    // Send to Telegram
     let chatIds = await storecanisterActor.getTelegramGroupCodes();
-    //remove any duplicate ids
     chatIds = [...new Set(chatIds)];
-    console.log("chat ids from the canister",chatIds);
     for (const chatId of chatIds) {
-        await safeMessageSend(chatId, message,inlineKeyboard);
+        await safeMessageSend(chatId, message, inlineKeyboard);
     }
+
+    // Send to Discord
+    await discordBot.sendMessage(message, urls);
 }
 
 // Function to send activity message
 async function sendActivityMessage() {
-    if (!isConnected) return;
-    
-    // Create inline keyboard with two rows - first row has two buttons, second row has one
-    const inlineKeyboard = {
-        reply_markup: {
-            inline_keyboard: [
-                [
-                    {
-                        text: '🌟 ICPSwap!',
-                        url: ICPSWAP_URL
-                    },
-                    {
-                        text: '🎉 KongSwap!',
-                        url: KONGSWAP_URL
-                    }
-                ],
-                [
-                    {
-                        text: '🎊 Website!',
-                        url: WEBSITE_URL,
-                        callback_data: 'celebrate'  // This makes the button appear wider
-                    }
-                ]
-            ]
-        },
-        parse_mode: 'HTML'
-    };
+    console.log("bot is running")
 
-    const message = `
-<b>🎆 Happy New Year! 🎆</b>
-
-<i>Wishing you joy and success in the coming year!</i>
-
-Click any button below to explore:`;
-
-let chatIds = await storecanisterActor.getTelegramGroupCodes();
-//fremove any duplicate ids
-chatIds = [...new Set(chatIds)];
-    for (const chatId of chatIds) {
-        try {
-            await bot.sendMessage(chatId, message, inlineKeyboard);
-        } catch (error) {
-            console.error(`Error sending card to ${chatId}:`, error.message);
-        }
-    }
 }
 
 // Function to fetch data
@@ -272,7 +232,7 @@ async function monitor() {
     if (!data) return;
 
     const currentValue = data;
-    if (previousValue !== null && currentValue > previousValue || currentValue === previousValue) {
+    if (previousValue !== null && Number(currentValue) > Number(previousValue)) {
 
         //get the info about the latest block
 
@@ -305,8 +265,8 @@ if (isConnected) {
     // Schedule the monitoring to run every 1 seconds
     schedule.scheduleJob('*/10 * * * * *', monitor);
 
-    // Schedule activity message every minute
-    // schedule.scheduleJob('*/1 * * * *', sendActivityMessage);
+   // Schedule activity message every minute
+    schedule.scheduleJob('*/10 * * * *', sendActivityMessage);
 
     console.log('Monitoring service started...');
 } 
