@@ -1,0 +1,5 @@
+service : {
+  addTelegramGroupCode: (text) -> ();
+  getTelegramGroupCodes: () -> (vec text);
+  removeTelegramGroupCode: (text) -> ();
+}

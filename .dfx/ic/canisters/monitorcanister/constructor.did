@@ -1,0 +1,6 @@
+type BIlMonitor = service {
+  addTelegramGroupCode : (text) -> ();
+  getTelegramGroupCodes : () -> (vec text);
+  removeTelegramGroupCode : (text) -> ();
+};
+service : () -> BIlMonitor
