@@ -75,7 +75,7 @@ async function fetchHistoricalData() {
             return;
         }
 
-        const currentBlockHeight = Number(latestBlock[0].header.height);
+        const currentBlockHeight = Number(4438);
         console.log(`Current block height: ${currentBlockHeight}`);
 
         // Process blocks in batches to avoid overwhelming the system
